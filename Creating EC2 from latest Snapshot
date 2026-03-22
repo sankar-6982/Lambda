@@ -1,0 +1,109 @@
+import boto3
+
+ec2 = boto3.client('ec2')
+
+def lambda_handler(event, context):
+
+    print("Step 1: Finding latest snapshot...")
+
+    snapshots = ec2.describe_snapshots(OwnerIds=['self'])
+
+    snapshots_sorted = sorted(
+        snapshots['Snapshots'],
+        key=lambda x: x['StartTime'],
+        reverse=True
+    )
+
+    latest_snapshot = snapshots_sorted[0]
+    snapshot_id = latest_snapshot['SnapshotId']
+
+    print(f"Latest snapshot: {snapshot_id}")
+
+
+
+    vpcs = ec2.describe_vpcs(
+        Filters=[{'Name': 'tag:Name', 'Values': ['my-project-VPC']}]
+    )
+
+    vpc_id = vpcs['Vpcs'][0]['VpcId']
+    print(f"VPC ID: {vpc_id}")
+
+
+
+    subnets = ec2.describe_subnets(
+        Filters=[
+            {'Name': 'tag:Name', 'Values': ['frontend-1a']},
+            {'Name': 'vpc-id', 'Values': [vpc_id]}
+        ]
+    )
+
+    subnet_id = subnets['Subnets'][0]['SubnetId']
+    print(f"Subnet ID: {subnet_id}")
+
+
+
+    security_groups = ec2.describe_security_groups(
+        Filters=[
+            {'Name': 'group-name', 'Values': ['Frontend-SG']},
+            {'Name': 'vpc-id', 'Values': [vpc_id]}
+        ]
+    )
+
+    sg_id = security_groups['SecurityGroups'][0]['GroupId']
+    print(f"Security Group ID: {sg_id}")
+
+
+
+    volume = ec2.create_volume(
+        SnapshotId=snapshot_id,
+        AvailabilityZone='ap-south-1a',
+        VolumeType='gp3'
+    )
+
+    volume_id = volume['VolumeId']
+    print(f"Volume created: {volume_id}")
+
+    waiter = ec2.get_waiter('volume_available')
+    waiter.wait(VolumeIds=[volume_id])
+
+    print("Volume is available")
+
+
+
+    instance = ec2.run_instances(
+        ImageId='ami-0f58b397bc5c1f2e8',  
+        InstanceType='t2.micro',
+        MinCount=1,
+        MaxCount=1,
+        SubnetId=subnet_id,
+        SecurityGroupIds=[sg_id],
+        TagSpecifications=[
+            {
+                'ResourceType': 'instance',
+                'Tags': [{'Key': 'Name', 'Value': 'Instance-from-Snapshot'}]
+            }
+        ]
+    )
+
+    instance_id = instance['Instances'][0]['InstanceId']
+    print(f"Instance created: {instance_id}")
+
+    waiter = ec2.get_waiter('instance_running')
+    waiter.wait(InstanceIds=[instance_id])
+
+    print("Instance is running")
+
+
+
+    ec2.attach_volume(
+        VolumeId=volume_id,
+        InstanceId=instance_id,
+        Device='/dev/xvdf'
+    )
+
+    print("Volume attached successfully")
+
+    return {
+        'statusCode': 200,
+        'body': f'Instance {instance_id} created successfully from snapshot {snapshot_id}'
+    }
