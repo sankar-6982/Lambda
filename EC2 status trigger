@@ -1,0 +1,49 @@
+import json
+import boto3
+
+sns = boto3.client('sns')
+
+SNS_TOPIC_ARN = "arn:aws:sns:ap-south-1:386315605351:ec2topic"
+
+def lambda_handler(event, context):
+
+    print("Event received:")
+    print(json.dumps(event))
+
+ 
+    if "detail" not in event:
+        print("Not an EC2 state change event")
+        return {
+            "statusCode": 200,
+            "body": "No EC2 event detected"
+        }
+
+
+    instance_id = event["detail"].get("instance-id", "Unknown")
+    state = event["detail"].get("state", "Unknown")
+    region = event.get("region", "Unknown")
+    time = event.get("time", "Unknown")
+
+
+    message = f"""
+EC2 Instance State Change Detected
+
+Instance ID : {instance_id}
+State       : {state}
+Region      : {region}
+Time        : {time}
+"""
+
+    print(message)
+
+
+    sns.publish(
+        TopicArn=SNS_TOPIC_ARN,
+        Subject="EC2 Instance State Change Alert",
+        Message=message
+    )
+
+    return {
+        "statusCode": 200,
+        "body": "Notification sent successfully"
+    }
